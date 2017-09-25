@@ -1,64 +1,62 @@
-var swig = require('swig');
-var React = require('react');
-//var Router = require('react-router-dom');
-import routes from "./app/routes";
-import {
-    BrowserRouter as Router, Route, match, Link, RouterContext
-} from 'react-router-dom';
+/* eslint no-console: "off"*/
 
+import path from 'path';
+import { Server } from 'http';
+import Express from 'express';
+import React from 'react';
+import { renderToString } from 'react-dom/server';
+import { StaticRouter as Router } from 'react-router-dom';
+import { App } from './src/App';
 
-var express = require('express');
-var path = require('path');
-var logger = require('morgan');
-var bodyParser = require('body-parser');
+const app = new Express();
+const server = new Server(app);
+const routes = require('../server/routes/index');
 
-var app = express();
+// use ejs templates
+app.set('view engine', 'ejs');
+app.set('views', path.join(__dirname, 'views'));
 
-app.set('port', process.env.PORT || 3000);
-app.use(logger('dev'));
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({extended: false}));
-app.use(express.static(path.join(__dirname, 'public')));
+// define the folder that will be used for static assets
+app.use(Express.static(path.join(__dirname, 'static')));
 
-/*app.use(function(req, res) {
-    Router.run(routes, req.path, function(Handler) {
-        var html = React.renderToString(React.createElement(Handler));
-        var page = swig.renderFile('views/index.html', { html: html });
-        res.send(page);
-    });
-});*/
+app.use('/api/v1', routes)
+
+// universal routing and rendering
 app.get('*', (req, res) => {
-    match(
-        {routes, location: req.url},
-        (err, redirectLocation, renderProps) => {
+    let markup = '';
+    let status = 200;
 
-            // in case of error display the error message
-            if (err) {
-                return res.status(500).send(err.message);
-            }
+    if (process.env.UNIVERSAL) {
+        const context = {};
+        markup = renderToString(
+            <Router location={req.url} context={context}>
+                <App />
+            </Router>,
+        );
 
-            // in case of redirect propagate the redirect to the browser
-            if (redirectLocation) {
-                return res.redirect(302, redirectLocation.pathname + redirectLocation.search);
-            }
-
-            // generate the React markup for the current route
-            let markup;
-            if (renderProps) {
-                // if the current route matched we have renderProps
-                markup = renderToString(<RouterContext {...renderProps}/>);
-            } else {
-                // otherwise we can render a 404 page
-                //markup = renderToString(<NotFoundPage/>);
-                //res.status(404);
-            }
-
-            // render the index template with the embedded React markup
-            return res.render('index', {markup});
+        // context.url will contain the URL to redirect to if a <Redirect> was used
+        if (context.url) {
+            return res.redirect(302, context.url);
         }
-    );
+
+        if (context.is404) {
+            status = 404;
+        }
+    }
+
+    return res.status(status).render('index', { markup });
 });
 
-app.listen(app.get('port'), function () {
-    console.log('Express server listening on port ' + app.get('port'));
+// start the server
+const port = process.env.PORT || 3000;
+const env = process.env.NODE_ENV || 'production';
+server.listen(port, (err) => {
+    if (err) {
+        return console.error(err);
+    }
+    return console.info(
+        `
+      Server running on http://localhost:${port} [${env}]
+      Universal rendering: ${process.env.UNIVERSAL ? 'enabled' : 'disabled'}
+    `);
 });
